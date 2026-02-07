@@ -1,4 +1,4 @@
-# R1 + OpenClaw Community Kit
+# CLAWDIA - R1-OpenClaw-Pairing-Kit
 
 Plug-and-play scripts and docs for connecting Rabbit R1 to OpenClaw with Tailscale and safer defaults.
 
@@ -18,7 +18,7 @@ If you are new, do these exact steps in order:
 2. Go to this folder:
 
 ```powershell
-cd C:\path\to\r1-openclaw-kit
+cd C:\path\to\your-repo-folder
 ```
 
 3. Run the one-command setup:

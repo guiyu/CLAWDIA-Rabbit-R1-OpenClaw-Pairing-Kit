@@ -1,4 +1,4 @@
-# Rabbit R1 + OpenClaw Community Setup Guide (Windows)
+# CLAWDIA - R1-OpenClaw-Pairing-Kit Setup Guide (Windows)
 
 This guide is designed to help Rabbit R1 users connect to OpenClaw reliably, with Tailscale access and safer defaults.
 
