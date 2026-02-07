@@ -1,0 +1,10 @@
+{
+  "type": "clawdbot-gateway",
+  "version": 1,
+  "ips": [
+    "YOUR-HOST.tailXXXXXXXX.ts.net"
+  ],
+  "port": 443,
+  "token": "REDACTED_REPLACE_WITH_REAL_TOKEN",
+  "protocol": "wss"
+}
