@@ -2,6 +2,8 @@
 
 This guide is designed to help Rabbit R1 users connect to OpenClaw reliably, with Tailscale access and safer defaults.
 
+If you are not a software engineer, this guide is still for you. Use the commands exactly as written, one block at a time.
+
 ## Important Disclaimers
 
 - This guide is an independent community resource and is **not** affiliated with Rabbit, OpenClaw, Anthropic, OpenAI, or Tailscale.
@@ -9,6 +11,27 @@ This guide is designed to help Rabbit R1 users connect to OpenClaw reliably, wit
 - This setup can expose services to your tailnet/internet if misconfigured; verify access controls before daily use.
 - Upstream updates can change behavior; re-run preflight and security checks after upgrades.
 - Never share real tokens, pairing payloads, or unredacted logs publicly.
+
+## Before You Start (2 minutes)
+
+- Make sure OpenClaw is already installed and can run locally.
+- Make sure Tailscale is installed and logged in.
+- Keep one PowerShell window open for commands.
+- Do not run random scripts from strangers with admin rights.
+- If a step fails, fix that step first and do not skip ahead.
+
+## Quick Path (Most Users)
+
+From the kit folder, run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\setup-community-kit.ps1 -GatewayHost "your-host.tailXXXXXXXX.ts.net"
+powershell -ExecutionPolicy Bypass -File .\r1-node-pair-watch.ps1 -TimeoutMinutes 10
+```
+
+Then on Rabbit R1: `Settings` -> `Device` -> `OpenClaw` -> `Reset OpenClaw` -> scan QR.
+
+If that works, you can skip to "Validate End-to-End".
 
 ## What This Kit Includes
 
@@ -47,6 +70,8 @@ This checks:
 - Tailscale command/status/serve mapping.
 - Security hardening flags in `openclaw.json`.
 
+Expected result for beginners: mostly `[PASS]` lines and no blocking failures.
+
 ### One-command setup (recommended)
 
 ```powershell
@@ -71,6 +96,7 @@ Notes:
 
 - Keep OpenClaw bound locally and let Tailscale be the public ingress path.
 - Use TLS (`wss`) in the QR payload.
+- If this command fails, run `tailscale status` first and log in again.
 
 ## 3) Security Baseline (Do This Before Pairing)
 
@@ -97,6 +123,7 @@ openclaw gateway restart
 ```
 
 - Never post real tokens in GitHub issues, Discord, or forum screenshots.
+- If you think a token leaked, rotate immediately and regenerate QR.
 
 ## 4) Generate Rabbit QR Payload + PNG
 
@@ -130,6 +157,8 @@ Then on Rabbit R1:
 5. Keep the pair watcher terminal open and wait for it to approve the `node.pair` request.
 6. Confirm the R1 changes from connecting/pairing to connected.
 
+Beginner tip: leave watcher running until it prints `APPROVED:<id>` or `TIMEOUT`.
+
 Manual fallback commands:
 
 ```powershell
@@ -158,6 +187,7 @@ openclaw agent --to +15551234567 --message "Respond exactly: gateway-model-test-
 - Re-check tailnet hostname, port, and protocol (`wss`, `443`).
 - Confirm `tailscale serve status` still maps to local gateway port.
 - Confirm token in QR matches current `gateway.auth.token`.
+- Regenerate the QR payload and scan again.
 
 `not-paired` in logs:
 
@@ -171,6 +201,13 @@ openclaw gateway stop
 openclaw gateway start
 openclaw gateway health
 ```
+
+## Noob Safety Checklist
+
+- Do not paste your live token into public chat.
+- Keep `r1-gateway-payload.json` local only.
+- Share only `r1-gateway-payload.example.json` publicly.
+- Keep your repo private until you verify no secrets are included.
 
 ## Community Sharing Checklist
 
