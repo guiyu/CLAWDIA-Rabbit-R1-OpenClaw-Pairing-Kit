@@ -2,6 +2,14 @@
 
 This guide is designed to help Rabbit R1 users connect to OpenClaw reliably, with Tailscale access and safer defaults.
 
+## Important Disclaimers
+
+- This guide is an independent community resource and is **not** affiliated with Rabbit, OpenClaw, Anthropic, OpenAI, or Tailscale.
+- Follow these steps at your own risk; you are responsible for your own devices, credentials, and network exposure.
+- This setup can expose services to your tailnet/internet if misconfigured; verify access controls before daily use.
+- Upstream updates can change behavior; re-run preflight and security checks after upgrades.
+- Never share real tokens, pairing payloads, or unredacted logs publicly.
+
 ## What This Kit Includes
 
 - `setup-community-kit.ps1`: one-command preflight + hardening + QR generation.

@@ -2,6 +2,14 @@
 
 Plug-and-play scripts and docs for connecting Rabbit R1 to OpenClaw with Tailscale and safer defaults.
 
+## Disclaimers
+
+- This is an independent community project and is **not** affiliated with Rabbit, OpenClaw, Anthropic, OpenAI, or Tailscale.
+- Use all scripts and configuration changes at your own risk.
+- You are responsible for your own device, account, network, token, and data security.
+- No warranty is provided; this kit may break with upstream updates or account policy changes.
+- Always rotate tokens if they are exposed and avoid posting secrets in screenshots/logs.
+
 ## Mascot
 
  Lobster gal with bunny ears:
