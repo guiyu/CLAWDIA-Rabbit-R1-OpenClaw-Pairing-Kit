@@ -1,125 +1,78 @@
 # CLAWDIA - Rabbit R1 + OpenClaw (Linux VPS Setup)
 
+## Connection Modes
+
+This toolkit supports two connection modes:
+
+1. **Tailscale Mode** (Recommended for security): Uses Tailscale's private mesh network
+2. **Public IP Mode**: Direct exposure via your VPS's public IP (requires firewall config)
+
 ## Quick Start
+
+### Option 1: Tailscale Mode (Secure, Recommended)
+
+**Prerequisites:**
+```bash
+# Install Tailscale on your VPS
+curl -fsSL https://tailscale.com/install.sh | sh
+tailscale login
+```
+
+**Run Setup:**
+```bash
+cd ~/CLAWDIA-Rabbit-R1-OpenClaw-Pairing-Kit
+chmod +x *.sh
+
+# Run interactively (mode will be prompted)
+./setup-community-kit.sh
+
+# Or specify mode explicitly
+./setup-community-kit.sh \
+  --Mode tailscale \
+  --GatewayHost "your-host.tailnet.ts.net" \
+  --Port 443
+```
+
+### Option 2: Public IP Mode (VPS with public IP)
+
+**Run Setup:**
+```bash
+cd ~/CLAWDIA-Rabbit-R1-OpenClaw-Pairing-Kit
+
+# Interactive mode (will prompt for IP)
+./setup-community-kit.sh --Mode public
+
+# Or specify public IP manually
+./setup-community-kit.sh \
+  --Mode public \
+  --GatewayHost "your-public-ip.com" \
+  --Port 443
+```
+
+**Configure Firewall:**
+```bash
+# Ubuntu/Debian (UFW)
+sudo ufw allow 443/tcp
+
+# CentOS/RHEL (firewalld)
+sudo firewall-cmd --permanent --add-port=443/tcp
+sudo firewall-cmd --reload
+
+# AWS/Azure/GCP
+# Configure security group/NSG to allow TCP 443
+```
 
 ### One-Click Installation
 
 ```bash
-# Clone or download to your VPS
-cd ~
-git clone https://github.com/YOUR_USERNAME/CLAWDIA-Rabbit-R1-OpenClaw-Pairing-Kit.git
-cd CLAWDIA-Rabbit-R1-OpenClaw-Pairing-Kit
-
-# Make scripts executable
-chmod +x *.sh
-
-# Option 1: Run directly
-./setup-community-kit.sh --GatewayHost "your-host.tailnet.ts.net"
-
-# Option 2: Install to PATH (adds ~./local/bin/clawdia-r1)
+# Install scripts to PATH (works with both modes)
 ./install.sh
 source ~/.bashrc
-setup --GatewayHost "your-host.tailnet.ts.net"
+
+# Then run any script from anywhere
+preflight
+setup --Mode public --GatewayHost your-ip.com
 ```
-
-### Manual Installation Steps
-
-#### 1. Prerequisites
-
-Ensure your Linux VPS has:
-- **bash** (version 4.0+)
-- **curl** or **wget**
-- **jq** (JSON parser)
-- **openclaw** CLI installed
-- **tailscale** CLI installed (recommended)
-
-Install dependencies:
-```bash
-# Ubuntu/Debian
-sudo apt-get update && sudo apt-get install -y curl wget jq
-
-# CentOS/RHEL
-sudo yum install -y curl wget jq
-
-# Alpine
-apk update && apk add curl wget jq
-
-# Fedora
-sudo dnf install -y curl wget jq
-```
-
-#### 2. Verify OpenClaw Installation
-
-```bash
-# Check openclaw is installed
-openclaw --version
-
-# Check gateway health
-openclaw gateway health
-
-# Check config file exists
-cat ~/.openclaw/openclaw.json
-```
-
-#### 3. Run Preflight Check
-
-```bash
-# Check system is ready
-./r1-openclaw-preflight.sh
-
-# Expected output: all [PASS] or expected [WARN] messages
-```
-
-#### 4. Run Tailscale (if using Tailscale)
-
-```bash
-# Login to Tailscale (if not already logged in)
-tailscale up
-
-# Verify Tailscale is running
-tailscale status
-
-# Check serve rules (if configured)
-tailscale serve status
-```
-
-#### 5. Run Full Setup
-
-```bash
-# Main setup script
-./setup-community-kit.sh \
-  --GatewayHost "your-host.tailnet.ts.net" \
-  --Port 443 \
-  --Protocol wss
-```
-
-This will:
-1. Run preflight checks
-2. Apply security hardening (can skip with `--SkipHardening`)
-3. Generate QR payload and PNG image
-
-#### 6. Start Pair Watcher
-
-In a **separate terminal**:
-
-```bash
-# Start the pair approval watcher
-./r1-node-pair-watch.sh --TimeoutMinutes 10 --PollSeconds 1
-```
-
-Keep this terminal open - it will automatically approve pairing requests from your Rabbit R1.
-
-#### 7. Pair Your Rabbit R1
-
-On your Rabbit R1 device:
-1. Go to **Settings** → **Device** → **OpenClaw**
-2. Select **Reset OpenClaw** (if previously paired)
-3. Choose **Scan QR Code**
-4. Scan the QR code from `r1-gateway-qr.png`
-
-The pair watcher will detect and approve the request automatically.
-
----
 
 ## Command Reference
 
@@ -129,30 +82,39 @@ The pair watcher will detect and approve the request automatically.
 ./setup-community-kit.sh [OPTIONS]
 
 Options:
-  --GatewayHost <host>  Required. Tailscale gateway host (e.g., your-host.tailnet.ts.net)
+  --GatewayHost <host>  Required. Gateway host (Tailscale or public IP)
   --Port <number>       TCP port (default: 443)
   --Protocol <wss|ws>   WebSocket protocol (default: wss)
   --SkipHardening       Skip security hardening step
   --NoPng              Generate JSON only, skip QR code PNG
+  --Mode <mode>         Connection mode: tailscale or public (default: prompt)
 ```
 
-**Example:**
+**Examples:**
+
 ```bash
-./setup-community-kit.sh --GatewayHost "myserver.tailnet.ts.net" --Port 443
+# Tailscale with prompt for host
+./setup-community-kit.sh --Mode tailscale
+
+# Public IP direct
+./setup-community-kit.sh --Mode public --GatewayHost 1.2.3.4
+
+# Custom port
+./setup-community-kit.sh --GatewayHost "myserver.ts.net" --Port 8443
+
+# Skip hardening and skip QR PNG
+./setup-community-kit.sh --GatewayHost "host.ts.net" --SkipHardening --NoPng
 ```
 
-### Preflight Script
+### Preflight Check
 
 ```bash
 ./r1-openclaw-preflight.sh [config_path]
 
-Arguments:
-  config_path  Path to openclaw.json (default: ~/.openclaw/openclaw.json)
-```
+# Check your setup before pairing
+./r1-openclaw-preflight.sh
 
-**Example:**
-```bash
-./r1-openclaw-preflight.sh ~/.openclaw/openclaw.json
+# Shows Tailscale status if available, or public IP detection
 ```
 
 ### Pair Watcher
@@ -161,9 +123,9 @@ Arguments:
 ./r1-node-pair-watch.sh [OPTIONS]
 
 Options:
-  --TimeoutMinutes <min>  Watch duration in minutes (default: 10)
-  --PollSeconds <sec>     Poll interval in seconds (default: 1)
-  --LogPath <path>        Log file path (default: ./.r1-pair-watch/r1-node-pair-watch.log)
+  --TimeoutMinutes <min>  Watch duration (default: 10)
+  --PollSeconds <sec>     Poll interval (default: 1)
+  --LogPath <path>        Log file path
 ```
 
 **Example:**
@@ -177,77 +139,47 @@ Options:
 ./r1-generate-qr.sh [OPTIONS]
 
 Options:
-  --GatewayHost <host>  Required. Tailscale gateway host
+  --GatewayHost <host>  Required. Gateway host or public IP
   --Port <number>       TCP port (default: 443)
   --Protocol <wss|ws>   WebSocket protocol (default: wss)
-  --OutJson <path>      Output JSON file path
-  --OutPng <path>       Output PNG file path
   --NoPng              Skip PNG generation
 ```
 
-**Example:**
+## Troubleshooting
+
+### Public IP Mode Issues
+
+**Problem: Rabbit can't connect to gateway**
 ```bash
-./r1-generate-qr.sh --GatewayHost "myserver.ts.net" --OutJson ~/payload.json
+# Test connectivity from your network
+curl -I https://your-public-ip:443
+
+# Check gateway is listening
+sudo ss -tlnp | grep 443
+
+# Verify firewall
+sudo ufw status  # or firewall-cmd --list-all
 ```
 
----
-
-## Troubleshooting
+**Problem: Tailscale not needed**
+- Preflight will skip Tailscale checks if not installed
+- Use public IP mode if VPS has public IP
+- No additional Tailscale configuration needed
 
 ### Gateway Health Check Fails
 
 ```bash
-# Check openclaw service status
-sudo systemctl status openclaw  # if using systemd
-
-# Restart gateway
+# Restart OpenClaw gateway
 openclaw gateway restart
 
-# Check for errors
+# Check gateway status
 openclaw gateway health
-openclaw gateway logs
 ```
-
-### Tailscale Not Found
-
-```bash
-# Install Tailscale on Linux
-curl -fsSL https://tailscale.com/install.sh | sh
-
-# Login with your auth key
-tailscale up --authkey=tskey-auth-YOUR_AUTH_KEY
-
-# Verify connection
-tailscale status
-```
-
-### QR Code Not Scanning
-
-1. Verify the gateway host is accessible from Rabbit R1's network
-2. Check that Tailscale serve rules allow R1 access
-3. Regenerate the QR code:
-   ```bash
-   ./r1-generate-qr.sh --GatewayHost "your-host.tailnet.ts.net"
-   ```
-4. Ensure R1 is on the same Tailscale network
-
-### Pair Watcher Times Out
-
-- **Increase timeout**: `--TimeoutMinutes 20`
-- **Check logs**: `cat ./.r1-pair-watch/r1-node-pair-watch.log`
-- **Verify gateway is responding**: 
-  ```bash
-  openclaw gateway call node.pair.list --json
-  ```
 
 ### Config File Issues
 
-The config file is typically at `~/.openclaw/openclaw.json`.
-
-To fix common configuration issues:
-
+Apply security hardening manually:
 ```bash
-# Apply security hardening
 openclaw config set gateway.auth.mode token
 openclaw config set gateway.auth.allowTailscale true
 openclaw config set gateway.trustedProxies '["127.0.0.1","::1"]'
@@ -257,51 +189,44 @@ openclaw security audit --fix
 openclaw gateway restart
 ```
 
----
-
 ## Security Notes
 
-- **Never share** real `gateway.auth.token` in screenshots or public posts
-- Use `r1-gateway-payload.example.json` for public examples
-- Tokens are stored in `~/.openclaw/openclaw.json` - protect this file
-- Rotate tokens immediately if exposed:
-  ```bash
-  openclaw gateway generate-token
-  ```
+**Tailscale Mode:**
+- ✅ Private network, no public exposure
+- ✅ Automatic encryption
+- ✅ Recommended for security-conscious users
 
----
+**Public IP Mode:**
+- ⚠️ Gateway exposed to internet
+- ⚠️ Ensure firewall restrictions
+- ⚠️ Use strong authentication tokens
+- ⚠️ Monitor for unusual access
 
-## File Structure
+**Token Security:**
+- Never share real `gateway.auth.token` publicly
+- Use `r1-gateway-payload.example.json` for screenshots
+- Rotate tokens: `openclaw gateway generate-token`
 
+## Quick Reference
+
+```bash
+# Tailscale setup
+./setup-community-kit.sh --Mode tailscale --GatewayHost "host.ts.net"
+
+# Public IP setup
+./setup-community-kit.sh --Mode public --GatewayHost "1.2.3.4"
+
+# Pair watcher
+./r1-node-pair-watch.sh --TimeoutMinutes 10
+
+# Check connection
+./r1-openclaw-preflight.sh
 ```
-~/.local/bin/clawdia-r1/       # Installed scripts (if using install.sh)
-├── setup-community-kit.sh
-├── r1-openclaw-preflight.sh
-├── r1-generate-qr.sh
-├── r1-node-pair-watch.sh
-├── r1-gateway-payload.example.json
-
-./                              # Working directory
-├── r1-gateway-payload.json     # Generated QR payload
-├── r1-gateway-qr.png           # Generated QR code image
-└── .r1-pair-watch/
-    └── r1-node-pair-watch.log  # Pair watcher log file
-```
-
----
-
-## Support & Resources
-
-- **Documentation**: View `R1_OPENCLAW_SETUP_GUIDE.md` for comprehensive guide
-- **Example Payload**: See `r1-gateway-payload.example.json` for format reference
-- **Release Checklist**: See `PUBLIC_RELEASE_CHECKLIST.md` for safe sharing guidelines
-
----
 
 ## Disclaimers
 
-- This is a **community project**, not affiliated with Rabbit, OpenClaw, Anthropic, OpenAI, or Tailscale
-- Use all scripts and configuration changes **at your own risk**
-- No warranty is provided
-- You are responsible for your own device, account, network, token, and data security
-- Always rotate tokens if they are exposed
+- Community project, not affiliated with Rabbit/OpenClaw
+- Use at your own risk
+- No warranty provided
+- Responsible for your security and data
+- Rotate tokens if exposed

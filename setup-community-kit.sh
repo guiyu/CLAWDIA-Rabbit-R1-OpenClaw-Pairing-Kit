@@ -2,6 +2,7 @@
 set -euo pipefail
 
 # One-click setup script for Linux VPS
+# Supports both Tailscale and public IP modes
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -23,12 +24,6 @@ print_status() {
     echo -e "${color}[$status] $msg${NC}"
 }
 
-check_cmd() {
-    command -v "$1" >/dev/null 2>&1
-}
-
-print_status INFO "=== OpenClaw + R1 Setup (Linux) ==="
-
 # Get script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -38,6 +33,7 @@ PORT=443
 PROTOCOL="wss"
 SKIP_HARDENING=false
 NO_PNG=false
+MODE="tailscale"
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -46,12 +42,52 @@ while [[ $# -gt 0 ]]; do
         --Protocol) PROTOCOL="$2"; shift 2 ;;
         --SkipHardening) SKIP_HARDENING=true ;;
         --NoPng) NO_PNG=true ;;
+        --Mode) MODE="$2"; shift 2 ;;
         *) echo "Unknown option: $1"; exit 1 ;;
     esac
 done
 
-if [[ -z "$GATEWAY_HOST" ]]; then
-    read -p "Enter Tailscale Gateway Host (e.g., your-host.tailnet.ts.net): " GATEWAY_HOST
+# Ask for mode choice if not specified
+if [[ -z "$MODE" ]]; then
+    echo -e "${CYAN}Connection Mode:${NC}"
+    echo "1. Tailscale (recommended for security)"
+    echo "2. Public IP (direct exposure, requires firewall config)"
+    read -p "Choose mode [1-2]: " MODE_CHOICE
+    
+    case $MODE_CHOICE in
+        1) MODE="tailscale" ;;
+        2) MODE="public" ;;
+        *) MODE="tailscale" ;;
+    esac
+fi
+
+# Get gateway host based on mode
+if [[ "$MODE" == "public" ]]; then
+    # Try to auto-detect public IP
+    if [[ -z "$GATEWAY_HOST" ]]; then
+        PUBLIC_IP=$(curl -s4m 5 http://api4.ipify.org 2>/dev/null || echo "")
+        if [[ -n "$PUBLIC_IP" ]]; then
+            read -p "Use public IP $PUBLIC_IP as gateway host? [Y/n]: " VERIFY
+            if [[ "$VERIFY" =~ ^[Yy]$ ]]; then
+                GATEWAY_HOST="$PUBLIC_IP"
+            fi
+        fi
+    fi
+    
+    if [[ -z "$GATEWAY_HOST" ]]; then
+        read -p "Enter your public IP address: " GATEWAY_HOST
+    fi
+    
+    echo -e "${YELLOW}Note: Ensure firewall allows connections on port $PORT${NC}"
+elif [[ "$MODE" == "tailscale" ]]; then
+    if command -v tailscale >/dev/null 2>&1; then
+        if [[ -z "$GATEWAY_HOST" ]]; then
+            read -p "Enter Tailscale Gateway Host (e.g., your-host.tailnet.ts.net): " GATEWAY_HOST
+        fi
+    else
+        echo -e "${YELLOW}Tailscale not installed, using public IP mode${NC}"
+        MODE="public"
+    fi
 fi
 
 if [[ -z "$GATEWAY_HOST" ]]; then
@@ -63,24 +99,15 @@ fi
 echo ""
 echo -e "${CYAN}== 1/3 Preflight checks ==${NC}"
 
-PASS_COUNT=0
-WARN_COUNT=0
-FAIL_COUNT=0
-
 check_pass() { print_status PASS "$1"; ((PASS_COUNT++)); }
 check_warn() { print_status WARN "$1"; ((WARN_COUNT++)); }
 check_fail() { print_status FAIL "$1"; ((FAIL_COUNT++)); }
 
-if check_cmd openclaw; then
+# Check openclaw CLI
+if command -v openclaw >/dev/null 2>&1; then
     check_pass "openclaw CLI found"
 else
     check_fail "openclaw CLI not found in PATH"
-fi
-
-if check_cmd tailscale; then
-    check_pass "tailscale CLI found"
-else
-    check_warn "tailscale CLI not found in PATH"
 fi
 
 # Gateway health check
@@ -101,31 +128,10 @@ else
     check_fail "gateway status RPC failed"
 fi
 
-# Tailscale checks
-if check_cmd tailscale; then
-    if tailscale status >/dev/null 2>&1; then
-        check_pass "tailscale status OK"
-    else
-        check_warn "tailscale status command failed"
-    fi
-
-    if SERVE_STATUS=$(tailscale serve status 2>&1); then
-        if echo "$SERVE_STATUS" | grep -q "127\.0\.0\.1"; then
-            check_pass "tailscale serve has localhost forwarding rules"
-        else
-            check_warn "tailscale serve status returned, but no localhost mapping detected"
-        fi
-    else
-        check_warn "tailscale serve status failed: $SERVE_STATUS"
-    fi
-fi
-
 # Config checks
 CONFIG_PATH="$HOME/.openclaw/openclaw.json"
 if [[ -f "$CONFIG_PATH" ]]; then
-    if ! jq empty "$CONFIG_PATH" 2>/dev/null; then
-        check_fail "invalid JSON in $CONFIG_PATH"
-    else
+    if [ "$(jq empty "$CONFIG_PATH" 2>/dev/null)" ] || [[ -z "$(jq empty "$CONFIG_PATH" 2>/dev/null)" ]]; then
         AUTH_MODE=$(jq -r '.gateway.auth.mode // empty' "$CONFIG_PATH")
         if [[ "$AUTH_MODE" == "token" ]]; then
             check_pass "gateway.auth.mode is token"
@@ -160,9 +166,21 @@ if [[ -f "$CONFIG_PATH" ]]; then
         else
             check_warn "browser.evaluateEnabled is not false"
         fi
+    else
+        check_fail "invalid JSON in $CONFIG_PATH"
     fi
 else
     check_warn "config not found at $CONFIG_PATH"
+fi
+
+# Public IP mode warnings
+if [[ "$MODE" == "public" ]]; then
+    PUBLIC_IP=$(curl -s4m 5 http://api4.ipify.org 2>/dev/null || echo "unknown")
+    if [[ "$PUBLIC_IP" != "unknown" ]]; then
+        check_pass "Public IP available: $PUBLIC_IP"
+    else
+        check_warn "Could not detect public IP (using $GATEWAY_HOST)"
+    fi
 fi
 
 echo ""
@@ -183,6 +201,19 @@ if [[ "$SKIP_HARDENING" != "true" ]]; then
     openclaw config set gateway.trustedProxies '["127.0.0.1","::1"]'
     openclaw config set tools.elevated.enabled false
     openclaw config set browser.evaluateEnabled false
+    
+    if [[ "$MODE" == "public" ]]; then
+        # For public IP, also allow the public IP in trusted proxies
+        PUBLIC_IP=$(curl -s4m 5 http://api4.ipify.org 2>/dev/null || echo "")
+        if [[ -n "$PUBLIC_IP" ]]; then
+            openclaw config set gateway.trustedProxies "[\"127.0.0.1\",\"::1\",\"$PUBLIC_IP\"]"
+        fi
+        
+        echo -e "${YELLOW}Configured for public IP mode${NC}"
+        echo -e "${YELLOW}Important: Ensure your firewall allows port $PORT${NC}"
+        echo -e "${YELLOW}Example: sudo ufw allow $PORT/tcp${NC}"
+    fi
+    
     openclaw security audit --fix
     openclaw gateway restart
     openclaw security audit --deep --json 2>/dev/null || true
@@ -226,43 +257,50 @@ print_status PASS "Payload JSON: $SCRIPT_DIR/r1-gateway-payload.json"
 
 # Generate QR PNG
 if [[ "$NO_PNG" != "true" ]]; then
-    if command -v curl >/dev/null 2>&1; then
-        ENCODED=$(printf '%s' "$JSON_PAYLOAD" | curl -g -G -w '' -o /dev/null -s --data-urlencode "text=" "https://quickchart.io/qr?size=900")
-        # Proper URL encoding
-        ENCODED=$(printf '%s' "$JSON_PAYLOAD" | python3 -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.stdin.read()))' 2>/dev/null || \
-                  printf '%s' "$JSON_PAYLOAD" | xargs -0 -I{} urllib -e '{}' 2>/dev/null || \
-                  printf '%s' "$JSON_PAYLOAD" | base64 | tr '+/' '-_')
-        
-        if command -v python3 >/dev/null 2>&1; then
-            python3 -c "
+    if command -v python3 >/dev/null 2>&1; then
+        python3 -c "
 import urllib.parse
 import urllib.request
+import json
+
 json_data = '''$JSON_PAYLOAD'''
 encoded = urllib.parse.quote(json_data)
 url = f'https://quickchart.io/qr?size=900&text={encoded}'
 try:
-    urllib.request.urlretrieve(url, '$SCRIPT_DIR/r1-gateway-qr.png')
-    print('QR PNG generated successfully')
+    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+    with urllib.request.urlopen(req, timeout=30) as response:
+        with open('$SCRIPT_DIR/r1-gateway-qr.png', 'wb') as f:
+            f.write(response.read())
 except Exception as e:
     print(f'QR generation failed: {e}')
-" 2>/dev/null || print_status WARN "QR PNG generation failed"
-        elif command -v wget >/dev/null 2>&1; then
-            ENCODED=$(printf '%s' "$JSON_PAYLOAD" | sed 's/ /%20/g; s/"/\\"/g; s/\\n/%0A/g')
-            wget -q "https://quickchart.io/qr?size=900&text=$ENCODED" -O "$SCRIPT_DIR/r1-gateway-qr.png" 2>/dev/null || \
-            print_status WARN "QR PNG generation failed"
-        else
-            print_status WARN "No QR generation tool available (needs python3 or wget/curl)"
-        fi
-        
-        if [[ -f "$SCRIPT_DIR/r1-gateway-qr.png" ]]; then
-            print_status PASS "QR PNG: $SCRIPT_DIR/r1-gateway-qr.png"
-        fi
+    import sys
+    sys.exit(1)
+" 2>/dev/null && print_status PASS "QR PNG: $SCRIPT_DIR/r1-gateway-qr.png" || \
+        print_status WARN "QR PNG generation failed"
+    elif command -v wget >/dev/null 2>&1; then
+        ENCODED=$(printf '%s' "$JSON_PAYLOAD" | python3 -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.stdin.read()))' 2>/dev/null || echo "$JSON_PAYLOAD")
+        wget -q --user-agent="Mozilla/5.0" "https://quickchart.io/qr?size=900&text=$ENCODED" -O "$SCRIPT_DIR/r1-gateway-qr.png" 2>/dev/null && \
+        print_status PASS "QR PNG: $SCRIPT_DIR/r1-gateway-qr.png" || \
+        print_status WARN "QR PNG generation failed"
     else
-        print_status WARN "curl not found, skipping QR PNG generation"
+        print_status WARN "No QR generation tool available (python3 or wget required)"
     fi
 fi
 
 echo ""
 print_status PASS "Done!"
+echo ""
+echo -e "${GREEN}Connection mode:${NC} $MODE"
+echo -e "${GREEN}Gateway host:${NC} $GATEWAY_HOST:$PORT"
+echo ""
 echo -e "${GREEN}Next step:${NC}"
+if [[ "$MODE" == "tailscale" ]]; then
+    echo "On Rabbit R1: Settings -> Device -> OpenClaw -> Reset OpenClaw -> Scan QR"
+else
+    echo "1. Ensure port $PORT is open in your firewall"
+    echo "2. On Rabbit R1: Settings -> Device -> OpenClaw -> Reset OpenClaw -> Scan QR"
+    echo -e "${YELLOW}Note: Rabbit R1 must be able to reach $GATEWAY_HOST:$PORT${NC}"
+fi
+echo ""
+echo -e "${GREEN}Then run:${NC}"
 echo "bash $SCRIPT_DIR/r1-node-pair-watch.sh --TimeoutMinutes 10"

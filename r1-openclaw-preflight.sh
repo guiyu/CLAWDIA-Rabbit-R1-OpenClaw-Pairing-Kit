@@ -41,11 +41,11 @@ else
     check_fail "openclaw CLI not found in PATH"
 fi
 
-# Check tailscale CLI
+# Check tailscale CLI (optional)
 if command -v tailscale >/dev/null 2>&1; then
     check_pass "tailscale CLI found at $(command -v tailscale)"
 else
-    check_warn "tailscale CLI not found in PATH"
+    check_warn "tailscale CLI not found in PATH (optional, skip if using public IP)"
 fi
 
 # Gateway health check
@@ -66,7 +66,7 @@ else
     check_fail "gateway status RPC failed"
 fi
 
-# Tailscale status
+# Tailscale status (optional)
 if command -v tailscale >/dev/null 2>&1; then
     if tailscale status >/dev/null 2>&1; then
         check_pass "tailscale status OK"
@@ -82,6 +82,16 @@ if command -v tailscale >/dev/null 2>&1; then
         fi
     else
         check_warn "tailscale serve status failed: $SERVE_STATUS"
+    fi
+fi
+
+# Public IP check (alternative to Tailscale)
+if ! command -v tailscale >/dev/null 2>&1; then
+    PUBLIC_IP=$(curl -s4m 5 http://api4.ipify.org 2>/dev/null || curl -s4m 5 http://ipinfo.io/ip 2>/dev/null || echo "unknown")
+    if [[ "$PUBLIC_IP" != "unknown" ]]; then
+        check_pass "Public IP available: $PUBLIC_IP (using public IP mode)"
+    else
+        check_warn "No public IP detected (ensure firewall allows port $PORT)"
     fi
 fi
 
