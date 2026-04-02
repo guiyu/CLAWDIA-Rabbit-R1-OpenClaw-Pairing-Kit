@@ -1,6 +1,6 @@
 #!/bin/bash
 # One-click installation script for Linux VPS
-# Downloads and installs all scripts with proper permissions
+# Copies local scripts to PATH
 
 set -euo pipefail
 
@@ -56,48 +56,45 @@ if [[ "$DEPENDENCIES_OK" != "true" ]]; then
     fi
 fi
 
+# Get script directory (where install.sh is located)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Check if we're in the repository
+if [[ ! -f "$SCRIPT_DIR/setup-community-kit.sh" ]]; then
+    print_error "Run this script from the CLAWDIA repository directory"
+    print_info "Expected to find scripts in: $SCRIPT_DIR"
+    exit 1
+fi
+
 # Create installation directory
 INSTALL_DIR="$HOME/.local/bin/clawdia-r1"
 mkdir -p "$INSTALL_DIR"
 
 echo ""
-print_info "Downloading scripts to $INSTALL_DIR..."
+print_info "Installing scripts from $SCRIPT_DIR to $INSTALL_DIR..."
 
-# Download scripts from GitHub (adjust URL as needed)
-# This assumes scripts are in the same repo - modify URL for your setup
-SCRIPT_BASE_URL="https://raw.githubusercontent.com/YOUR_USERNAME/CLAWDIA-Rabbit-R1-OpenClaw-Pairing-Kit/main"
-
-declare -A SCRIPTS
-SCRIPTS=(
-    ["setup"]="setup-community-kit.sh"
-    ["preflight"]="r1-openclaw-preflight.sh"
-    ["watch"]="r1-node-pair-watch.sh"
-    ["qr"]="r1-generate-qr.sh"
-)
-
-for key in "${!SCRIPTS[@]}"; do
-    SCRIPT_URL="${SCRIPT_BASE_URL}/${SCRIPTS[$key]}"
-    print_info "Downloading ${SCRIPTS[$key]}..."
-    
-    if command -v curl >/dev/null 2>&1; then
-        curl -sL -o "$INSTALL_DIR/${SCRIPTS[$key]}" "$SCRIPT_URL" 2>/dev/null
-    elif command -v wget >/dev/null 2>&1; then
-        wget -q -O "$INSTALL_DIR/${SCRIPTS[$key]}" "$SCRIPT_URL" 2>/dev/null
-    fi
-    
-    if [[ -f "$INSTALL_DIR/${SCRIPTS[$key]}" ]]; then
-        chmod +x "$INSTALL_DIR/${SCRIPTS[$key]}"
-        print_success "${SCRIPTS[$key]} installed"
+# Copy scripts (not download)
+for script in setup-community-kit.sh r1-openclaw-preflight.sh r1-generate-qr.sh r1-node-pair-watch.sh; do
+    if [[ -f "$SCRIPT_DIR/$script" ]]; then
+        cp "$SCRIPT_DIR/$script" "$INSTALL_DIR/"
+        chmod +x "$INSTALL_DIR/$script"
+        
+        # Create alias/name without extension
+        name="${script%.sh}"
+        if [[ "$name" != $script ]]; then
+            ln -sf "$INSTALL_DIR/$script" "$INSTALL_DIR/$name"
+        fi
+        print_success "$script -> $INSTALL_DIR/"
     else
-        print_error "Failed to download ${SCRIPTS[$key]}"
+        print_warn "Script not found: $script"
     fi
 done
 
 # Copy example payload
 echo ""
 print_info "Copying example payload..."
-if [[ -f "$HOME/CLAWDIA-Rabbit-R1-OpenClaw-Pairing-Kit/r1-gateway-payload.example.json" ]]; then
-    cp "$HOME/CLAWDIA-Rabbit-R1-OpenClaw-Pairing-Kit/r1-gateway-payload.example.json" "$INSTALL_DIR/"
+if [[ -f "$SCRIPT_DIR/r1-gateway-payload.example.json" ]]; then
+    cp "$SCRIPT_DIR/r1-gateway-payload.example.json" "$INSTALL_DIR/"
     print_success "Example payload copied"
 fi
 
@@ -126,7 +123,7 @@ print_success "Scripts installed to: $INSTALL_DIR"
 echo ""
 echo -e "${CYAN}Quick Start:${NC}"
 echo "  # Run preflight check"
-echo "  $INSTALL_DIR/preflight"
+echo "  $INSTALL_DIR/r1-openclaw-preflight"
 echo ""
 echo "  # Full setup (requires Tailscale Gateway Host)"
 echo "  $INSTALL_DIR/setup --GatewayHost your-host.tailnet.ts.net"
@@ -135,5 +132,5 @@ echo "  # Start pair watcher (keep running during pairing)"
 echo "  $INSTALL_DIR/watch --TimeoutMinutes 10"
 echo ""
 echo -e "For full documentation, see:"
-echo "  https://github.com/YOUR_USERNAME/CLAWDIA-Rabbit-R1-OpenClaw-Pairing-Kit"
+echo "  $(pwd)"
 echo ""
