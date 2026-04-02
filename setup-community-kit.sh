@@ -40,6 +40,11 @@ PASS_COUNT=0
 WARN_COUNT=0
 FAIL_COUNT=0
 
+# Helper to extract JSON from command output (handles console warnings)
+extract_json() {
+    echo "$1" | grep -o '{.*}' | tail -1
+}
+
 while [[ $# -gt 0 ]]; do
     case $1 in
         --GatewayHost|-H) GATEWAY_HOST="$2"; shift 2 ;;
@@ -69,7 +74,6 @@ fi
 # Get gateway host based on mode
 if [[ -z "$GATEWAY_HOST" ]]; then
     if [[ "$MODE" == "public" ]]; then
-        # Try to auto-detect public IP
         PUBLIC_IP=$(curl -s4m 5 http://api4.ipify.org 2>/dev/null || echo "")
         if [[ -n "$PUBLIC_IP" ]]; then
             read -p "Use public IP $PUBLIC_IP as gateway host? [Y/n]: " VERIFY
@@ -118,23 +122,22 @@ check_pass() { echo -e "${GREEN}[PASS] $1${NC}"; PASS_COUNT=$((PASS_COUNT+1)); }
 check_warn() { echo -e "${YELLOW}[WARN] $1${NC}"; WARN_COUNT=$((WARN_COUNT+1)); }
 check_fail() { echo -e "${RED}[FAIL] $1${NC}"; FAIL_COUNT=$((FAIL_COUNT+1)); }
 
-# Check openclaw CLI
 if command -v openclaw >/dev/null 2>&1; then
     check_pass "openclaw CLI found"
 else
     check_fail "openclaw CLI not found in PATH"
 fi
 
-# Gateway health check
 if openclaw gateway health >/dev/null 2>&1; then
     check_pass "gateway health is OK"
 else
     check_fail "gateway health check failed"
 fi
 
-# Gateway status JSON
+# Gateway status JSON - extract from noisy output
 if STATUS_RAW=$(openclaw gateway call status --json 2>/dev/null); then
-    if echo "$STATUS_RAW" | jq empty 2>/dev/null; then
+    STATUS_JSON=$(extract_json "$STATUS_RAW")
+    if [[ -n "$STATUS_JSON" ]] && echo "$STATUS_JSON" | jq empty 2>/dev/null; then
         check_pass "gateway status RPC returned valid JSON"
     else
         check_fail "gateway status RPC returned invalid JSON"
@@ -148,39 +151,19 @@ CONFIG_PATH="$HOME/.openclaw/openclaw.json"
 if [[ -f "$CONFIG_PATH" ]]; then
     if jq empty "$CONFIG_PATH" 2>/dev/null; then
         AUTH_MODE=$(jq -r '.gateway.auth.mode // empty' "$CONFIG_PATH")
-        if [[ "$AUTH_MODE" == "token" ]]; then
-            check_pass "gateway.auth.mode is token"
-        else
-            check_warn "gateway.auth.mode is '$AUTH_MODE' (recommended: token)"
-        fi
+        [[ "$AUTH_MODE" == "token" ]] && check_pass "gateway.auth.mode is token" || check_warn "gateway.auth.mode is '$AUTH_MODE' (recommended: token)"
 
         ALLOW_TS=$(jq -r '.gateway.auth.allowTailscale // empty' "$CONFIG_PATH")
-        if [[ "$ALLOW_TS" == "true" ]]; then
-            check_pass "gateway.auth.allowTailscale is true"
-        else
-            check_warn "gateway.auth.allowTailscale is not true"
-        fi
+        [[ "$ALLOW_TS" == "true" ]] && check_pass "gateway.auth.allowTailscale is true" || check_warn "gateway.auth.allowTailscale is not true"
 
         LOOPBACK_CHECK=$(jq -r '.gateway.trustedProxies // [] | contains(["127.0.0.1", "::1"])' "$CONFIG_PATH")
-        if [[ "$LOOPBACK_CHECK" == "true" ]]; then
-            check_pass "gateway.trustedProxies includes loopback"
-        else
-            check_warn "gateway.trustedProxies missing loopback IPs"
-        fi
+        [[ "$LOOPBACK_CHECK" == "true" ]] && check_pass "gateway.trustedProxies includes loopback" || check_warn "gateway.trustedProxies missing loopback IPs"
 
         ELEVATED=$(jq -r '.tools.elevated.enabled // false' "$CONFIG_PATH")
-        if [[ "$ELEVATED" == "false" ]]; then
-            check_pass "tools.elevated.enabled is false"
-        else
-            check_warn "tools.elevated.enabled is not false"
-        fi
+        [[ "$ELEVATED" == "false" ]] && check_pass "tools.elevated.enabled is false" || check_warn "tools.elevated.enabled is not false"
 
         BROWSER_EVAL=$(jq -r '.browser.evaluateEnabled // false' "$CONFIG_PATH")
-        if [[ "$BROWSER_EVAL" == "false" ]]; then
-            check_pass "browser.evaluateEnabled is false"
-        else
-            check_warn "browser.evaluateEnabled is not false"
-        fi
+        [[ "$BROWSER_EVAL" == "false" ]] && check_pass "browser.evaluateEnabled is false" || check_warn "browser.evaluateEnabled is not false"
     else
         check_fail "invalid JSON in $CONFIG_PATH"
     fi
@@ -191,11 +174,7 @@ fi
 # Public IP mode warnings
 if [[ "$MODE" == "public" ]]; then
     PUBLIC_IP=$(curl -s4m 5 http://api4.ipify.org 2>/dev/null || echo "unknown")
-    if [[ "$PUBLIC_IP" != "unknown" ]]; then
-        check_pass "Public IP available: $PUBLIC_IP"
-    else
-        check_warn "Could not detect public IP (using $GATEWAY_HOST)"
-    fi
+    [[ "$PUBLIC_IP" != "unknown" ]] && check_pass "Public IP available: $PUBLIC_IP" || check_warn "Could not detect public IP (using $GATEWAY_HOST)"
 fi
 
 echo ""
@@ -219,10 +198,7 @@ if [[ "$SKIP_HARDENING" != "true" ]]; then
     
     if [[ "$MODE" == "public" ]]; then
         PUBLIC_IP=$(curl -s4m 5 http://api4.ipify.org 2>/dev/null || echo "")
-        if [[ -n "$PUBLIC_IP" ]]; then
-            openclaw config set gateway.trustedProxies "[\"127.0.0.1\",\"::1\",\"$PUBLIC_IP\"]"
-        fi
-        
+        [[ -n "$PUBLIC_IP" ]] && openclaw config set gateway.trustedProxies "[\"127.0.0.1\",\"::1\",\"$PUBLIC_IP\"]"
         echo -e "${YELLOW}Configured for public IP mode${NC}"
         echo -e "${YELLOW}Important: Ensure your firewall allows port $PORT${NC}"
         echo -e "${YELLOW}Example: sudo ufw allow $PORT/tcp${NC}"
@@ -244,8 +220,8 @@ echo -e "${CYAN}== 3/3 Generate Rabbit QR payload ==${NC}"
 mkdir -p "$(dirname "$SCRIPT_DIR/r1-gateway-payload.json")"
 mkdir -p "$(dirname "$SCRIPT_DIR/r1-gateway-qr.png")"
 
-# Get gateway token
-if TOKEN=$(openclaw gateway call settings --json 2>/dev/null | jq -r '.gateway.auth.token // empty'); then
+# Get gateway token - extract JSON from noisy output
+if TOKEN=$(extract_json "$(openclaw gateway call settings --json 2>/dev/null)" | jq -r '.gateway.auth.token // empty'); then
     :
 elif [[ -f "$CONFIG_PATH" ]]; then
     TOKEN=$(jq -r '.gateway.auth.token // empty' "$CONFIG_PATH")
@@ -269,10 +245,7 @@ print_status PASS "Payload JSON: $SCRIPT_DIR/r1-gateway-payload.json"
 if [[ "$NO_PNG" != "true" ]]; then
     if command -v python3 >/dev/null 2>&1; then
         python3 -c "
-import urllib.parse
-import urllib.request
-import sys
-
+import urllib.parse, urllib.request, sys
 json_data = '''$JSON_PAYLOAD'''
 encoded = urllib.parse.quote(json_data)
 url = f'https://quickchart.io/qr?size=900&text={encoded}'
@@ -281,17 +254,13 @@ try:
     with urllib.request.urlopen(req, timeout=30) as response:
         with open('$SCRIPT_DIR/r1-gateway-qr.png', 'wb') as f:
             f.write(response.read())
-    print('QR PNG generated')
 except Exception as e:
     print(f'Failed: {e}', file=sys.stderr)
     sys.exit(1)
-" 2>/dev/null && print_status PASS "QR PNG: $SCRIPT_DIR/r1-gateway-qr.png" || \
-        print_status WARN "QR PNG generation failed"
+" 2>/dev/null && print_status PASS "QR PNG: $SCRIPT_DIR/r1-gateway-qr.png" || print_status WARN "QR PNG generation failed"
     elif command -v wget >/dev/null 2>&1; then
         ENCODED="$(printf '%s' "$JSON_PAYLOAD" | python3 -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.stdin.read()))' 2>/dev/null || echo "$JSON_PAYLOAD")"
-        wget -q --user-agent="Mozilla/5.0" "https://quickchart.io/qr?size=900&text=$ENCODED" -O "$SCRIPT_DIR/r1-gateway-qr.png" 2>/dev/null && \
-        print_status PASS "QR PNG: $SCRIPT_DIR/r1-gateway-qr.png" || \
-        print_status WARN "QR PNG generation failed"
+        wget -q --user-agent="Mozilla/5.0" "https://quickchart.io/qr?size=900&text=$ENCODED" -O "$SCRIPT_DIR/r1-gateway-qr.png" 2>/dev/null && print_status PASS "QR PNG: $SCRIPT_DIR/r1-gateway-qr.png" || print_status WARN "QR PNG generation failed"
     else
         print_status WARN "No QR generation tool available (python3 or wget required)"
     fi

@@ -31,6 +31,13 @@ check_pass() { echo -e "${GREEN}[PASS] $1${NC}"; PASS_COUNT=$((PASS_COUNT+1)); }
 check_warn() { echo -e "${YELLOW}[WARN] $1${NC}"; WARN_COUNT=$((WARN_COUNT+1)); }
 check_fail() { echo -e "${RED}[FAIL] $1${NC}"; FAIL_COUNT=$((FAIL_COUNT+1)); }
 
+# Helper to extract JSON from command output (handles console warnings)
+extract_json() {
+    local output="$1"
+    # Find the first { and last }) and extract JSON
+    echo "$output" | grep -o '{.*}' | tail -1
+}
+
 print_status INFO "=== OpenClaw + R1 Preflight ==="
 CONFIG_PATH="${1:-$HOME/.openclaw/openclaw.json}"
 
@@ -52,8 +59,10 @@ else
     check_fail "gateway health check failed"
 fi
 
+# Gateway status RPC - extract JSON from potentially noisy output
 if STATUS_RAW=$(openclaw gateway call status --json 2>/dev/null); then
-    if echo "$STATUS_RAW" | jq empty 2>/dev/null; then
+    STATUS_JSON=$(extract_json "$STATUS_RAW")
+    if [[ -n "$STATUS_JSON" ]] && echo "$STATUS_JSON" | jq empty 2>/dev/null; then
         check_pass "gateway status RPC returned valid JSON"
     else
         check_fail "gateway status RPC returned invalid JSON"
