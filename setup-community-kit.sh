@@ -35,6 +35,11 @@ SKIP_HARDENING=false
 NO_PNG=false
 MODE="tailscale"
 
+# Initialize counters
+PASS_COUNT=0
+WARN_COUNT=0
+FAIL_COUNT=0
+
 while [[ $# -gt 0 ]]; do
     case $1 in
         --GatewayHost|-H) GATEWAY_HOST="$2"; shift 2 ;;
@@ -57,36 +62,46 @@ if [[ -z "$MODE" ]]; then
     case $MODE_CHOICE in
         1) MODE="tailscale" ;;
         2) MODE="public" ;;
-        *) MODE="tailscale" ;;
+        *) MODE="public" ;;
     esac
 fi
 
 # Get gateway host based on mode
-if [[ "$MODE" == "public" ]]; then
-    # Try to auto-detect public IP
-    if [[ -z "$GATEWAY_HOST" ]]; then
+if [[ -z "$GATEWAY_HOST" ]]; then
+    if [[ "$MODE" == "public" ]]; then
+        # Try to auto-detect public IP
         PUBLIC_IP=$(curl -s4m 5 http://api4.ipify.org 2>/dev/null || echo "")
         if [[ -n "$PUBLIC_IP" ]]; then
             read -p "Use public IP $PUBLIC_IP as gateway host? [Y/n]: " VERIFY
-            if [[ "$VERIFY" =~ ^[Yy]$ ]]; then
+            if [[ "$VERIFY" =~ ^[Yy]$ || -z "$VERIFY" ]]; then
                 GATEWAY_HOST="$PUBLIC_IP"
             fi
         fi
-    fi
-    
-    if [[ -z "$GATEWAY_HOST" ]]; then
-        read -p "Enter your public IP address: " GATEWAY_HOST
-    fi
-    
-    echo -e "${YELLOW}Note: Ensure firewall allows connections on port $PORT${NC}"
-elif [[ "$MODE" == "tailscale" ]]; then
-    if command -v tailscale >/dev/null 2>&1; then
+        
         if [[ -z "$GATEWAY_HOST" ]]; then
-            read -p "Enter Tailscale Gateway Host (e.g., your-host.tailnet.ts.net): " GATEWAY_HOST
+            read -p "Enter your public IP address: " GATEWAY_HOST
         fi
+        
+        echo -e "${YELLOW}Note: Ensure firewall allows connections on port $PORT${NC}"
     else
-        echo -e "${YELLOW}Tailscale not installed, using public IP mode${NC}"
-        MODE="public"
+        if command -v tailscale >/dev/null 2>&1; then
+            read -p "Enter Tailscale Gateway Host (e.g., your-host.tailnet.ts.net): " GATEWAY_HOST
+        else
+            echo -e "${YELLOW}Tailscale not installed, using public IP mode${NC}"
+            MODE="public"
+            
+            PUBLIC_IP=$(curl -s4m 5 http://api4.ipify.org 2>/dev/null || echo "")
+            if [[ -n "$PUBLIC_IP" ]]; then
+                read -p "Use public IP $PUBLIC_IP as gateway host? [Y/n]: " VERIFY
+                if [[ "$VERIFY" =~ ^[Yy]$ || -z "$VERIFY" ]]; then
+                    GATEWAY_HOST="$PUBLIC_IP"
+                fi
+            fi
+            
+            if [[ -z "$GATEWAY_HOST" ]]; then
+                read -p "Enter your public IP address: " GATEWAY_HOST
+            fi
+        fi
     fi
 fi
 
@@ -99,9 +114,9 @@ fi
 echo ""
 echo -e "${CYAN}== 1/3 Preflight checks ==${NC}"
 
-check_pass() { print_status PASS "$1"; ((PASS_COUNT++)); }
-check_warn() { print_status WARN "$1"; ((WARN_COUNT++)); }
-check_fail() { print_status FAIL "$1"; ((FAIL_COUNT++)); }
+check_pass() { echo -e "${GREEN}[PASS] $1${NC}"; PASS_COUNT=$((PASS_COUNT+1)); }
+check_warn() { echo -e "${YELLOW}[WARN] $1${NC}"; WARN_COUNT=$((WARN_COUNT+1)); }
+check_fail() { echo -e "${RED}[FAIL] $1${NC}"; FAIL_COUNT=$((FAIL_COUNT+1)); }
 
 # Check openclaw CLI
 if command -v openclaw >/dev/null 2>&1; then
@@ -131,7 +146,7 @@ fi
 # Config checks
 CONFIG_PATH="$HOME/.openclaw/openclaw.json"
 if [[ -f "$CONFIG_PATH" ]]; then
-    if [ "$(jq empty "$CONFIG_PATH" 2>/dev/null)" ] || [[ -z "$(jq empty "$CONFIG_PATH" 2>/dev/null)" ]]; then
+    if jq empty "$CONFIG_PATH" 2>/dev/null; then
         AUTH_MODE=$(jq -r '.gateway.auth.mode // empty' "$CONFIG_PATH")
         if [[ "$AUTH_MODE" == "token" ]]; then
             check_pass "gateway.auth.mode is token"
@@ -203,7 +218,6 @@ if [[ "$SKIP_HARDENING" != "true" ]]; then
     openclaw config set browser.evaluateEnabled false
     
     if [[ "$MODE" == "public" ]]; then
-        # For public IP, also allow the public IP in trusted proxies
         PUBLIC_IP=$(curl -s4m 5 http://api4.ipify.org 2>/dev/null || echo "")
         if [[ -n "$PUBLIC_IP" ]]; then
             openclaw config set gateway.trustedProxies "[\"127.0.0.1\",\"::1\",\"$PUBLIC_IP\"]"
@@ -227,7 +241,6 @@ fi
 echo ""
 echo -e "${CYAN}== 3/3 Generate Rabbit QR payload ==${NC}"
 
-# Create output directories
 mkdir -p "$(dirname "$SCRIPT_DIR/r1-gateway-payload.json")"
 mkdir -p "$(dirname "$SCRIPT_DIR/r1-gateway-qr.png")"
 
@@ -241,7 +254,6 @@ else
     exit 1
 fi
 
-# Build payload
 JSON_PAYLOAD=$(jq -nc \
     --arg type 'clawdbot-gateway' \
     --argjson version 1 \
@@ -251,17 +263,15 @@ JSON_PAYLOAD=$(jq -nc \
     --arg protocol "$PROTOCOL" \
     '{type: $type, version: $version, ips: [$ips], port: $port, token: $token, protocol: $protocol}')
 
-# Save JSON
 echo "$JSON_PAYLOAD" > "$SCRIPT_DIR/r1-gateway-payload.json"
 print_status PASS "Payload JSON: $SCRIPT_DIR/r1-gateway-payload.json"
 
-# Generate QR PNG
 if [[ "$NO_PNG" != "true" ]]; then
     if command -v python3 >/dev/null 2>&1; then
         python3 -c "
 import urllib.parse
 import urllib.request
-import json
+import sys
 
 json_data = '''$JSON_PAYLOAD'''
 encoded = urllib.parse.quote(json_data)
@@ -271,14 +281,14 @@ try:
     with urllib.request.urlopen(req, timeout=30) as response:
         with open('$SCRIPT_DIR/r1-gateway-qr.png', 'wb') as f:
             f.write(response.read())
+    print('QR PNG generated')
 except Exception as e:
-    print(f'QR generation failed: {e}')
-    import sys
+    print(f'Failed: {e}', file=sys.stderr)
     sys.exit(1)
 " 2>/dev/null && print_status PASS "QR PNG: $SCRIPT_DIR/r1-gateway-qr.png" || \
         print_status WARN "QR PNG generation failed"
     elif command -v wget >/dev/null 2>&1; then
-        ENCODED=$(printf '%s' "$JSON_PAYLOAD" | python3 -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.stdin.read()))' 2>/dev/null || echo "$JSON_PAYLOAD")
+        ENCODED="$(printf '%s' "$JSON_PAYLOAD" | python3 -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.stdin.read()))' 2>/dev/null || echo "$JSON_PAYLOAD")"
         wget -q --user-agent="Mozilla/5.0" "https://quickchart.io/qr?size=900&text=$ENCODED" -O "$SCRIPT_DIR/r1-gateway-qr.png" 2>/dev/null && \
         print_status PASS "QR PNG: $SCRIPT_DIR/r1-gateway-qr.png" || \
         print_status WARN "QR PNG generation failed"
