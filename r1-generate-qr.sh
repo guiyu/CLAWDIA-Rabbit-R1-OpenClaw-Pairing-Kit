@@ -117,6 +117,7 @@ elif command -v wget >/dev/null 2>&1; then
     echo "Warning: QR PNG generation failed" >&2
 else
     echo "Warning: No QR generation tool available (python3 or wget required)" >&2
+    fi
 fi
 
 echo "Done. Keep token private when sharing files/screenshots."
